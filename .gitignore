@@ -1,0 +1,21 @@
+```
+# dataset and large files
+data/features/
+*.npy
+*.hdf5
+
+# checkpoints
+checkpoints/
+
+# python environment
+venv/
+__pycache__/
+*.pyc
+*.pth
+
+# system files
+.DS_Store
+Thumbs.db
+
+# jupyter checkpoints
+.ipynb_checkpoints/
