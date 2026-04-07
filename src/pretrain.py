@@ -181,3 +181,60 @@ def pretrain(model, dataloader, num_epochs=10, learning_rate=1e-3,
     print(f"Pretraining complete. Best loss: {best_loss:.4f}")
 
     return model, history
+
+if __name__ == "__main__":
+    import argparse
+    from dataset import SoccerNetDataset, get_dataloader
+    from model import SoccerNetTransformer
+
+    parser = argparse.ArgumentParser(description="Stage 1 MFM Pretraining")
+    parser.add_argument("--data_path", type=str, default="D:/soccernet-data")
+    parser.add_argument("--checkpoint_dir", type=str, default="checkpoints")
+    parser.add_argument("--num_epochs", type=int, default=10)
+    parser.add_argument("--batch_size", type=int, default=32)
+    parser.add_argument("--learning_rate", type=float, default=1e-3)
+    parser.add_argument("--mask_ratio", type=float, default=0.15)
+    parser.add_argument("--window_size", type=int, default=60)
+    args = parser.parse_args()
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    print("Loading training dataset...")
+    train_dataset = SoccerNetDataset(
+        data_path=args.data_path,
+        split="train",
+        window_size=args.window_size,
+        overlap=0.5
+    )
+
+    pretrain_loader = get_dataloader(
+        train_dataset,
+        batch_size=args.batch_size,
+        shuffle=True,
+        use_weighted_sampler=False
+    )
+
+    model = SoccerNetTransformer(
+        input_dim=512,
+        d_model=256,
+        num_heads=4,
+        num_layers=3,
+        dim_feedforward=512,
+        dropout=0.1,
+        num_classes=7
+    )
+
+    model, history = pretrain(
+        model=model,
+        dataloader=pretrain_loader,
+        num_epochs=args.num_epochs,
+        learning_rate=args.learning_rate,
+        mask_ratio=args.mask_ratio,
+        checkpoint_dir=args.checkpoint_dir,
+        device=device
+    )
+
+    print("\nSaving loss history...")
+    history_path = os.path.join(args.checkpoint_dir, "pretrain_history.npy")
+    np.save(history_path, np.array(history))
+    print(f"Loss history saved to {history_path}")
