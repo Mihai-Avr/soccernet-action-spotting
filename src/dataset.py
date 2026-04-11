@@ -25,7 +25,8 @@ for cls, idx in CLASS_TO_IDX.items():
 print(f"  Background: {BACKGROUND_IDX}")
 
 class SoccerNetDataset(Dataset):
-    def __init__(self, data_path, split, window_size=60, overlap=0.5):
+    def __init__(self, data_path, split, window_size=60, overlap=0.5,
+                 label_fraction=1.0, random_seed=42):
         """
         data_path   : path to soccernet-data folder on the HDD
         split       : "train", "valid", or "test"
@@ -37,6 +38,8 @@ class SoccerNetDataset(Dataset):
         self.window_size = window_size
         self.overlap = overlap
         self.samples = []
+        self.label_fraction = label_fraction
+        self.random_seed = random_seed
 
         game_list = getListGames(split)
         print(f"Loading {split} split — {len(game_list)} games...")
@@ -75,6 +78,7 @@ class SoccerNetDataset(Dataset):
 
                 action_frame_set = set(action_frames.keys())
 
+                action_samples = []
                 for ann_frame, class_idx in action_frames.items():
                     start = max(0, ann_frame - window_size // 2)
                     end = start + window_size
@@ -82,7 +86,17 @@ class SoccerNetDataset(Dataset):
                         end = num_frames
                         start = end - window_size
                     window = features[start:end]
-                    self.samples.append((window, class_idx))
+                    action_samples.append((window, class_idx))
+
+                if label_fraction < 1.0:
+                    rng = np.random.RandomState(random_seed)
+                    n_keep = max(1, int(len(action_samples) * label_fraction))
+                    indices = rng.choice(
+                        len(action_samples), size=n_keep, replace=False
+                    )
+                    action_samples = [action_samples[i] for i in indices]
+
+                self.samples.extend(action_samples)
 
                 step = max(1, int(window_size * (1 - overlap)))
                 for start in range(0, num_frames - window_size, step):

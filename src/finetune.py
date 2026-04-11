@@ -96,7 +96,7 @@ def evaluate(model, dataloader, criterion, device):
 
 def finetune(model, train_dataset, valid_dataset, num_epochs=30,
              learning_rate=1e-4, batch_size=32, checkpoint_dir="checkpoints",
-             patience=7, device=None, num_classes=7):
+             patience=7, device=None, num_classes=7, run_name="finetune", resume_checkpoint=None):
     """
     Full Stage 2 fine-tuning loop with early stopping and checkpointing.
 
@@ -145,12 +145,25 @@ def finetune(model, train_dataset, valid_dataset, num_epochs=30,
 
     best_val_loss = float("inf")
     epochs_without_improvement = 0
+    start_epoch = 1
     history = {
         "train_loss": [],
         "train_acc": [],
         "val_loss": [],
         "val_acc": []
     }
+
+    if resume_checkpoint and os.path.exists(resume_checkpoint):
+        print(f"Resuming from checkpoint: {resume_checkpoint}")
+        ckpt = torch.load(resume_checkpoint, map_location=device, weights_only=False)
+        model.load_state_dict(ckpt["model_state_dict"])
+        optimizer.load_state_dict(ckpt["optimizer_state_dict"])
+        start_epoch = ckpt["epoch"] + 1
+        best_val_loss = ckpt["val_loss"]
+        history = ckpt["history"]
+        print(f"  Resumed from epoch {ckpt['epoch']} "
+            f"(val_loss: {ckpt['val_loss']:.4f}, "
+            f"val_acc: {ckpt['val_acc']:.1f}%)")
 
     print(f"Starting Stage 2 fine-tuning on {device}")
     print(f"  Epochs        : {num_epochs} (patience={patience})")
@@ -160,7 +173,7 @@ def finetune(model, train_dataset, valid_dataset, num_epochs=30,
     print(f"  Valid samples : {len(valid_dataset)}")
     print("-" * 60)
 
-    for epoch in range(1, num_epochs + 1):
+    for epoch in range(start_epoch, num_epochs + 1):
         train_loss, train_acc = finetune_one_epoch(
             model=model,
             dataloader=train_loader,
@@ -196,7 +209,7 @@ def finetune(model, train_dataset, valid_dataset, num_epochs=30,
             "val_loss": val_loss,
             "val_acc": val_acc,
             "history": history
-        }, os.path.join(checkpoint_dir, "finetune_latest.pt"))
+        }, os.path.join(checkpoint_dir, f"{run_name}_latest.pt"))
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
@@ -206,7 +219,7 @@ def finetune(model, train_dataset, valid_dataset, num_epochs=30,
                 "model_state_dict": model.state_dict(),
                 "val_loss": val_loss,
                 "val_acc": val_acc
-            }, os.path.join(checkpoint_dir, "finetune_best.pt"))
+            }, os.path.join(checkpoint_dir, f"{run_name}_best.pt"))
             print(f"  -> New best model saved "
                   f"(val_loss: {best_val_loss:.4f}, val_acc: {val_acc:.1f}%)")
         else:
@@ -233,13 +246,15 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Stage 2 Fine-tuning")
     parser.add_argument("--data_path", type=str, default="D:/soccernet-data")
     parser.add_argument("--checkpoint_dir", type=str, default="checkpoints")
-    parser.add_argument("--pretrain_checkpoint", type=str,
-                        default="checkpoints/pretrain_best.pt")
+    parser.add_argument("--resume_checkpoint", type=str, default=None)
+    parser.add_argument("--run_name", type=str, default="finetune")
+    parser.add_argument("--pretrain_checkpoint", type=str, default=None)
     parser.add_argument("--num_epochs", type=int, default=30)
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--learning_rate", type=float, default=1e-4)
     parser.add_argument("--patience", type=int, default=7)
     parser.add_argument("--window_size", type=int, default=60)
+    parser.add_argument("--label_fraction", type=float, default=1.0)
     args = parser.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -249,7 +264,8 @@ if __name__ == "__main__":
         data_path=args.data_path,
         split="train",
         window_size=args.window_size,
-        overlap=0.5
+        overlap=0.5,
+        label_fraction=args.label_fraction
     )
     valid_dataset = SoccerNetDataset(
         data_path=args.data_path,
@@ -268,11 +284,16 @@ if __name__ == "__main__":
         num_classes=7
     )
 
-    print(f"Loading pretrained weights from {args.pretrain_checkpoint}...")
-    checkpoint = torch.load(args.pretrain_checkpoint, map_location=device, weights_only=True)
-    model.load_state_dict(checkpoint["model_state_dict"])
-    print(f"  Loaded checkpoint from epoch {checkpoint['epoch']} "
-          f"(pretrain loss: {checkpoint['loss']:.4f})")
+    if args.pretrain_checkpoint:
+        print(f"Loading pretrained weights from {args.pretrain_checkpoint}...")
+        checkpoint = torch.load(args.pretrain_checkpoint, 
+                                map_location=device, 
+                                weights_only=True)
+        model.load_state_dict(checkpoint["model_state_dict"])
+        print(f"  Loaded checkpoint from epoch {checkpoint['epoch']} "
+              f"(pretrain loss: {checkpoint['loss']:.4f})")
+    else:
+        print("No pretrained weights loaded — training from scratch.")
 
     model, history = finetune(
         model=model,
@@ -284,12 +305,14 @@ if __name__ == "__main__":
         checkpoint_dir=args.checkpoint_dir,
         patience=args.patience,
         device=device,
-        num_classes=7
+        num_classes=7,
+        run_name=args.run_name,
+        resume_checkpoint=args.resume_checkpoint
     )
 
     print("\nSaving fine-tuning history...")
     np.save(
-        os.path.join(args.checkpoint_dir, "finetune_history.npy"),
+        os.path.join(args.checkpoint_dir, f"{args.run_name}_history.npy"),
         history
     )
     print("Done.")
