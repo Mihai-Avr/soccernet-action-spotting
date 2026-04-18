@@ -96,7 +96,7 @@ def evaluate(model, dataloader, criterion, device):
 
 def finetune(model, train_dataset, valid_dataset, num_epochs=30,
              learning_rate=1e-4, batch_size=32, checkpoint_dir="checkpoints",
-             patience=7, device=None, num_classes=7, run_name="finetune", resume_checkpoint=None):
+             patience=7, device=None, num_classes=18, run_name="finetune", resume_checkpoint=None):
     """
     Full Stage 2 fine-tuning loop with early stopping and checkpointing.
 
@@ -249,6 +249,7 @@ if __name__ == "__main__":
     parser.add_argument("--patience", type=int, default=7)
     parser.add_argument("--window_size", type=int, default=60)
     parser.add_argument("--label_fraction", type=float, default=1.0)
+    parser.add_argument("--num_classes", type=int, default=18)
     args = parser.parse_args()
 
     set_seed(42)
@@ -259,24 +260,24 @@ if __name__ == "__main__":
         data_path=args.data_path,
         split="train",
         window_size=args.window_size,
-        overlap=0.5,
+        overlap=0,
         label_fraction=args.label_fraction
     )
     valid_dataset = SoccerNetDataset(
         data_path=args.data_path,
         split="valid",
         window_size=args.window_size,
-        overlap=0.5
+        overlap=0
     )
 
     model = SoccerNetTransformer(
         input_dim=512,
-        d_model=256,
+        d_model=384,
         num_heads=4,
         num_layers=3,
-        dim_feedforward=512,
+        dim_feedforward=768,
         dropout=0.1,
-        num_classes=7
+        num_classes=18
     )
 
     if args.pretrain_checkpoint:
@@ -294,7 +295,7 @@ if __name__ == "__main__":
         checkpoint_dir=args.checkpoint_dir,
         patience=args.patience,
         device=device,
-        num_classes=7,
+        num_classes=18,
         run_name=args.run_name,
         resume_checkpoint=args.resume_checkpoint
     )

@@ -18,7 +18,7 @@ from model import SoccerNetTransformer
 from SoccerNet.utils import getListGames
 
 
-def evaluate_per_class(model, dataloader, device, num_classes=7):
+def evaluate_per_class(model, dataloader, device, num_classes=18):
     """
     Evaluates model on a dataset split computing per-class
     precision, recall, F1 and overall accuracy.
@@ -386,12 +386,12 @@ if __name__ == "__main__":
 
     model = SoccerNetTransformer(
         input_dim=512,
-        d_model=256,
+        d_model=384,
         num_heads=4,
         num_layers=3,
-        dim_feedforward=512,
+        dim_feedforward=768,
         dropout=0.1,
-        num_classes=7
+        num_classes=18
     )
 
     load_checkpoint(args.checkpoint, model, device=device)

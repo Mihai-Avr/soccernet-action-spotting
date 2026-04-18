@@ -29,12 +29,12 @@ class SoccerNetTransformer(nn.Module):
     def __init__(
         self,
         input_dim=512,
-        d_model=256,
+        d_model=384,
         num_heads=4,
         num_layers=3,
-        dim_feedforward=512,
+        dim_feedforward=768,
         dropout=0.1,
-        num_classes=7
+        num_classes=18
     ):
         super().__init__()
 

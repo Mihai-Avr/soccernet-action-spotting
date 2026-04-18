@@ -34,7 +34,7 @@ def mask_features(batch, mask_ratio=0.15):
     return masked_batch, mask, original
 
 class ReconstructionHead(nn.Module):
-    def __init__(self, d_model=256, output_dim=512):
+    def __init__(self, d_model=384, output_dim=512):
         """
         Projects encoder output back to original feature dimension.
         Used only in Stage 1, discarded before Stage 2.
@@ -118,7 +118,7 @@ def pretrain(model, dataloader, num_epochs=10, learning_rate=1e-3,
 
     model = model.to(device)
 
-    reconstruction_head = ReconstructionHead(d_model=256, output_dim=512).to(device)
+    reconstruction_head = ReconstructionHead(d_model=384, output_dim=512).to(device)
 
     optimizer = torch.optim.Adam(
         list(model.parameters()) + list(reconstruction_head.parameters()),
@@ -205,7 +205,7 @@ if __name__ == "__main__":
         data_path=args.data_path,
         split="train",
         window_size=args.window_size,
-        overlap=0.5
+        overlap=0
     )
 
     pretrain_loader = get_dataloader(
@@ -217,12 +217,12 @@ if __name__ == "__main__":
 
     model = SoccerNetTransformer(
         input_dim=512,
-        d_model=256,
+        d_model=384,
         num_heads=4,
         num_layers=3,
-        dim_feedforward=512,
+        dim_feedforward=768,
         dropout=0.1,
-        num_classes=7
+        num_classes=18
     )
 
     model, history = pretrain(

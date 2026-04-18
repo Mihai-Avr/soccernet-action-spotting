@@ -7,12 +7,23 @@ from SoccerNet.utils import getListGames
 from collections import Counter
 
 SELECTED_CLASSES = [
-    "Goal",
-    "Corner",
-    "Yellow card",
-    "Substitution",
+    "Ball out of play",
+    "Throw-in",
+    "Foul",
+    "Indirect free-kick",
+    "Clearance",
     "Shots on target",
-    "Shots off target"
+    "Shots off target",
+    "Corner",
+    "Substitution",
+    "Kick-off",
+    "Direct free-kick",
+    "Offside",
+    "Yellow card",
+    "Goal",
+    "Penalty",
+    "Red card",
+    "Yellow->red card"
 ]
 
 CLASS_TO_IDX = {cls: idx for idx, cls in enumerate(SELECTED_CLASSES)}
