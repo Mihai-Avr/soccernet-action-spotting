@@ -2,6 +2,7 @@ import os
 import json
 import torch
 import numpy as np
+from utils import get_device, load_checkpoint, set_seed
 from tqdm import tqdm
 from collections import defaultdict
 from sklearn.metrics import (
@@ -380,8 +381,8 @@ if __name__ == "__main__":
     parser.add_argument("--map_step", type=int, default=2)
     args = parser.parse_args()
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
+    set_seed(42)
+    device = get_device()
 
     model = SoccerNetTransformer(
         input_dim=512,
@@ -393,14 +394,8 @@ if __name__ == "__main__":
         num_classes=7
     )
 
-    print(f"Loading checkpoint: {args.checkpoint}")
-    checkpoint = torch.load(
-        args.checkpoint, map_location=device, weights_only=False
-    )
-    model.load_state_dict(checkpoint["model_state_dict"])
+    load_checkpoint(args.checkpoint, model, device=device)
     model = model.to(device)
-    print(f"  Loaded from epoch {checkpoint['epoch']} "
-          f"(val_acc: {checkpoint['val_acc']:.1f}%)")
 
     print(f"\nLoading {args.split} dataset...")
     test_dataset = SoccerNetDataset(

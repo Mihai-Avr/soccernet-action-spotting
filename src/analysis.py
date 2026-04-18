@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from tqdm import tqdm
 from collections import defaultdict
-
+from utils import get_device, load_checkpoint, set_seed
 from dataset import SoccerNetDataset, get_dataloader, SELECTED_CLASSES, IDX_TO_CLASS, BACKGROUND_IDX
 from model import SoccerNetTransformer
 
@@ -318,8 +318,8 @@ if __name__ == "__main__":
     parser.add_argument("--attention", action="store_true")
     args = parser.parse_args()
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(f"Using device: {device}")
+    set_seed(42)
+    device = get_device()
 
     model = SoccerNetTransformer(
         input_dim=512,
@@ -331,12 +331,8 @@ if __name__ == "__main__":
         num_classes=7
     )
 
-    checkpoint = torch.load(
-        args.checkpoint, map_location=device, weights_only=False
-    )
-    model.load_state_dict(checkpoint["model_state_dict"])
+    load_checkpoint(args.checkpoint, model, device=device)
     model = model.to(device)
-    print(f"Loaded checkpoint from epoch {checkpoint['epoch']}")
 
     print("\nLoading test dataset...")
     test_dataset = SoccerNetDataset(

@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import numpy as np
 from tqdm import tqdm
-
+from utils import get_device, set_seed
 
 def mask_features(batch, mask_ratio=0.15):
     """
@@ -197,7 +197,8 @@ if __name__ == "__main__":
     parser.add_argument("--window_size", type=int, default=60)
     args = parser.parse_args()
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    set_seed(42)
+    device = get_device()
 
     print("Loading training dataset...")
     train_dataset = SoccerNetDataset(

@@ -6,7 +6,7 @@ from tqdm import tqdm
 from torch.utils.data import DataLoader
 from dataset import SoccerNetDataset, get_dataloader
 from model import SoccerNetTransformer
-
+from utils import get_device, load_checkpoint, set_seed, plot_training_curves
 
 def compute_class_weights(dataset, num_classes, device):
     """
@@ -154,16 +154,10 @@ def finetune(model, train_dataset, valid_dataset, num_epochs=30,
     }
 
     if resume_checkpoint and os.path.exists(resume_checkpoint):
-        print(f"Resuming from checkpoint: {resume_checkpoint}")
-        ckpt = torch.load(resume_checkpoint, map_location=device, weights_only=False)
-        model.load_state_dict(ckpt["model_state_dict"])
-        optimizer.load_state_dict(ckpt["optimizer_state_dict"])
+        ckpt = load_checkpoint(resume_checkpoint, model, optimizer, device=device)
         start_epoch = ckpt["epoch"] + 1
         best_val_loss = ckpt["val_loss"]
         history = ckpt["history"]
-        print(f"  Resumed from epoch {ckpt['epoch']} "
-            f"(val_loss: {ckpt['val_loss']:.4f}, "
-            f"val_acc: {ckpt['val_acc']:.1f}%)")
 
     print(f"Starting Stage 2 fine-tuning on {device}")
     print(f"  Epochs        : {num_epochs} (patience={patience})")
@@ -257,7 +251,8 @@ if __name__ == "__main__":
     parser.add_argument("--label_fraction", type=float, default=1.0)
     args = parser.parse_args()
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    set_seed(42)
+    device = get_device()
 
     print("Loading datasets...")
     train_dataset = SoccerNetDataset(
@@ -285,13 +280,7 @@ if __name__ == "__main__":
     )
 
     if args.pretrain_checkpoint:
-        print(f"Loading pretrained weights from {args.pretrain_checkpoint}...")
-        checkpoint = torch.load(args.pretrain_checkpoint, 
-                                map_location=device, 
-                                weights_only=True)
-        model.load_state_dict(checkpoint["model_state_dict"])
-        print(f"  Loaded checkpoint from epoch {checkpoint['epoch']} "
-              f"(pretrain loss: {checkpoint['loss']:.4f})")
+        load_checkpoint(args.pretrain_checkpoint, model, device=device)
     else:
         print("No pretrained weights loaded — training from scratch.")
 
@@ -311,8 +300,11 @@ if __name__ == "__main__":
     )
 
     print("\nSaving fine-tuning history...")
-    np.save(
-        os.path.join(args.checkpoint_dir, f"{args.run_name}_history.npy"),
-        history
+    history_path = os.path.join(args.checkpoint_dir, f"{args.run_name}_history.npy")
+    np.save(history_path, history)
+    plot_training_curves(
+        history,
+        title=f"Training curves — {args.run_name}",
+        save_path=f"results/figures/curves_{args.run_name}.png"
     )
     print("Done.")
