@@ -133,6 +133,29 @@ def pretrain(model, dataloader, num_epochs=10, learning_rate=1e-3,
     )
 
     best_loss = float("inf")
+    start_epoch = 1
+    
+    if os.path.exists(os.path.join(checkpoint_dir, "pretrain_latest.pt")):
+        print("Found existing checkpoint — checking if resume is needed...")
+        response = input("Resume from latest checkpoint? (y/n): ")
+        if response.lower() == "y":
+            ckpt = torch.load(
+                os.path.join(checkpoint_dir, "pretrain_latest.pt"),
+                map_location=device,
+                weights_only=False
+            )
+            model.load_state_dict(ckpt["model_state_dict"])
+            reconstruction_head.load_state_dict(
+                ckpt["reconstruction_head_state_dict"]
+            )
+            optimizer.load_state_dict(ckpt["optimizer_state_dict"])
+            if "scheduler_state_dict" in ckpt:
+                scheduler.load_state_dict(ckpt["scheduler_state_dict"])
+            start_epoch = ckpt["epoch"] + 1
+            best_loss = ckpt["loss"]
+            print(f"Resumed from epoch {ckpt['epoch']} "
+                f"(loss: {ckpt['loss']:.4f})")
+
     history = []
 
     print(f"Starting Stage 1 pretraining on {device}")
@@ -142,7 +165,7 @@ def pretrain(model, dataloader, num_epochs=10, learning_rate=1e-3,
     print(f"  Batches/epoch : {len(dataloader)}")
     print("-" * 50)
 
-    for epoch in range(1, num_epochs + 1):
+    for epoch in range(start_epoch, num_epochs + 1):
         avg_loss = pretrain_one_epoch(
             model=model,
             reconstruction_head=reconstruction_head,
@@ -165,6 +188,7 @@ def pretrain(model, dataloader, num_epochs=10, learning_rate=1e-3,
             "model_state_dict": model.state_dict(),
             "reconstruction_head_state_dict": reconstruction_head.state_dict(),
             "optimizer_state_dict": optimizer.state_dict(),
+            "scheduler_state_dict": scheduler.state_dict(),
             "loss": avg_loss
         }, os.path.join(checkpoint_dir, "pretrain_latest.pt"))
 
