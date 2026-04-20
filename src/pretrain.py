@@ -33,6 +33,41 @@ def mask_features(batch, mask_ratio=0.15):
     
     return masked_batch, mask, original
 
+def mask_features_tube(batch, mask_ratio=0.75, tube_length=4):
+    """
+    Tube masking strategy inspired by VideoMAE.
+    Masks contiguous temporal blocks (tubes) rather than
+    individual random frames. Vectorized implementation.
+
+    batch        : tensor of shape (batch_size, window_size, input_dim)
+    mask_ratio   : fraction of frames to mask (default 0.75 = 75%)
+    tube_length  : number of consecutive frames per tube (default 4 = 2s)
+
+    Returns:
+        masked_batch : batch with masked positions set to zero
+        mask         : boolean tensor, True where frames were masked
+        original     : original unmasked batch (reconstruction targets)
+    """
+    batch_size, window_size, input_dim = batch.shape
+
+    original = batch.clone()
+    mask = torch.zeros(batch_size, window_size, dtype=torch.bool)
+
+    num_tubes_total = window_size // tube_length
+    num_tubes_to_mask = max(1, int(num_tubes_total * mask_ratio))
+
+    for i in range(batch_size):
+        tube_indices = torch.randperm(num_tubes_total)[:num_tubes_to_mask]
+        for tube_idx in tube_indices:
+            start = tube_idx * tube_length
+            end = min(start + tube_length, window_size)
+            mask[i, start:end] = True
+
+    masked_batch = batch.clone()
+    masked_batch[mask] = 0.0
+
+    return masked_batch, mask, original
+
 class ReconstructionHead(nn.Module):
     def __init__(self, d_model=384, output_dim=512):
         """
@@ -54,7 +89,8 @@ class ReconstructionHead(nn.Module):
 
 
 def pretrain_one_epoch(model, reconstruction_head, dataloader,
-                       optimizer, device, mask_ratio=0.15):
+                       optimizer, device, mask_ratio=0.75,
+                       tube_length=4, masking_strategy="tube"): # mask_ratio = 0.75 for tube masking, 0.15 for random masking
     """
     Runs one full epoch of Stage 1 MFM pretraining.
     Returns the average reconstruction loss for the epoch.
@@ -71,7 +107,15 @@ def pretrain_one_epoch(model, reconstruction_head, dataloader,
     for batch_windows, _ in progress_bar:
         batch_windows = batch_windows.to(device)
 
-        masked_batch, mask, original = mask_features(batch_windows, mask_ratio)
+        if masking_strategy == "tube":
+            masked_batch, mask, original = mask_features_tube(
+                batch_windows, mask_ratio, tube_length
+            )
+        else:
+            masked_batch, mask, original = mask_features(
+                batch_windows, mask_ratio
+            )
+            
         mask = mask.to(device)
 
         encoder_output = model.get_encoder_output(masked_batch)
@@ -99,7 +143,9 @@ def pretrain_one_epoch(model, reconstruction_head, dataloader,
 
 
 def pretrain(model, dataloader, num_epochs=10, learning_rate=1e-3,
-             mask_ratio=0.15, checkpoint_dir="checkpoints", device=None):
+             mask_ratio=0.75, tube_length=4,
+             masking_strategy="tube",
+             checkpoint_dir="checkpoints", device=None): # mask_ratio = 0.75 for tube masking, 0.15 for random masking
     """
     Full Stage 1 pretraining loop with checkpointing.
     
@@ -108,6 +154,8 @@ def pretrain(model, dataloader, num_epochs=10, learning_rate=1e-3,
     num_epochs     : number of pretraining epochs
     learning_rate  : initial learning rate
     mask_ratio     : fraction of frames to mask
+    tube_length    : length of tubes for tube masking
+    masking_strategy : strategy for masking ("tube" or "random")
     checkpoint_dir : directory to save checkpoints
     device         : torch device (cuda or cpu)
     """
@@ -159,10 +207,12 @@ def pretrain(model, dataloader, num_epochs=10, learning_rate=1e-3,
     history = []
 
     print(f"Starting Stage 1 pretraining on {device}")
-    print(f"  Epochs        : {num_epochs}")
-    print(f"  Learning rate : {learning_rate}")
-    print(f"  Mask ratio    : {mask_ratio}")
-    print(f"  Batches/epoch : {len(dataloader)}")
+    print(f"  Epochs           : {num_epochs}")
+    print(f"  Learning rate    : {learning_rate}")
+    print(f"  Masking strategy : {masking_strategy}")
+    print(f"  Mask ratio       : {mask_ratio}")
+    print(f"  Tube length      : {tube_length} frames ({tube_length/2:.1f}s)")
+    print(f"  Batches/epoch    : {len(dataloader)}")
     print("-" * 50)
 
     for epoch in range(start_epoch, num_epochs + 1):
@@ -172,8 +222,10 @@ def pretrain(model, dataloader, num_epochs=10, learning_rate=1e-3,
             dataloader=dataloader,
             optimizer=optimizer,
             device=device,
-            mask_ratio=mask_ratio
-        )
+            mask_ratio=mask_ratio,
+            tube_length=tube_length,
+            masking_strategy=masking_strategy
+)
 
         scheduler.step()
         history.append(avg_loss)
@@ -217,8 +269,11 @@ if __name__ == "__main__":
     parser.add_argument("--num_epochs", type=int, default=10)
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--learning_rate", type=float, default=1e-3)
-    parser.add_argument("--mask_ratio", type=float, default=0.15)
     parser.add_argument("--window_size", type=int, default=60)
+    parser.add_argument("--masking_strategy", type=str, default="tube",
+                    choices=["tube", "random"])
+    parser.add_argument("--tube_length", type=int, default=4)
+    parser.add_argument("--mask_ratio", type=float, default=0.75)
     args = parser.parse_args()
 
     set_seed(42)
@@ -255,6 +310,8 @@ if __name__ == "__main__":
         num_epochs=args.num_epochs,
         learning_rate=args.learning_rate,
         mask_ratio=args.mask_ratio,
+        tube_length=args.tube_length,
+        masking_strategy=args.masking_strategy,
         checkpoint_dir=args.checkpoint_dir,
         device=device
     )
