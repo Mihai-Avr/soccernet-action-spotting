@@ -125,7 +125,7 @@ class TCNBlock(nn.Module):
 class SoccerNetTCN(nn.Module):
     def __init__(
         self,
-        input_dim=512,
+        input_dim=8576,
         d_model=256,
         num_layers=8,
         kernel_size=3,
@@ -146,6 +146,7 @@ class SoccerNetTCN(nn.Module):
         super().__init__()
 
         self.input_projection = nn.Linear(input_dim, d_model)
+        self.input_norm = nn.LayerNorm(d_model)
 
         self.tcn_blocks = nn.ModuleList([
             TCNBlock(
@@ -173,6 +174,7 @@ class SoccerNetTCN(nn.Module):
         returns: (batch, seq_len, num_classes) logits at every timestamp
         """
         x = self.input_projection(x)
+        x = self.input_norm(x)
         for block in self.tcn_blocks:
             x = block(x)
         x = self.output_projection(x)
@@ -185,6 +187,7 @@ class SoccerNetTCN(nn.Module):
         shape: (batch, seq_len, d_model)
         """
         x = self.input_projection(x)
+        x = self.input_norm(x)
         for block in self.tcn_blocks:
             x = block(x)
         return x

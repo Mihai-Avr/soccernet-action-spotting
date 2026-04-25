@@ -5,7 +5,7 @@ import numpy as np
 from tqdm import tqdm
 
 from model import SoccerNetTCN
-from game_dataset import SoccerNetGameDataset, get_game_dataloader
+from game_dataset import SoccerNetGameDataset, get_game_dataloader, FEATURE_CONFIG
 from dataset import SELECTED_CLASSES, BACKGROUND_IDX
 from utils import get_device, set_seed, load_checkpoint
 
@@ -233,7 +233,9 @@ if __name__ == "__main__":
     parser.add_argument("--num_epochs", type=int, default=50)
     parser.add_argument("--learning_rate", type=float, default=1e-4)
     parser.add_argument("--patience", type=int, default=10)
-    parser.add_argument("--label_radius", type=int, default=4)
+    parser.add_argument("--label_radius", type=int, default=2)
+    parser.add_argument("--feature_type", type=str, default="baidu", choices=["resnet", "baidu"])
+    parser.add_argument("--max_games", type=int, default=None)
     args = parser.parse_args()
 
     set_seed(42)
@@ -243,18 +245,21 @@ if __name__ == "__main__":
     train_dataset = SoccerNetGameDataset(
         data_path=args.data_path,
         split="train",
-        fps=2,
-        label_radius=args.label_radius
+        feature_type=args.feature_type,
+        label_radius=args.label_radius,
+        max_games=args.max_games
     )
     valid_dataset = SoccerNetGameDataset(
         data_path=args.data_path,
         split="valid",
-        fps=2,
-        label_radius=args.label_radius
+        feature_type=args.feature_type,
+        label_radius=args.label_radius,
     )
+    
+    input_dim = FEATURE_CONFIG[args.feature_type]["input_dim"]
 
     model = SoccerNetTCN(
-        input_dim=512,
+        input_dim=input_dim,
         d_model=256,
         num_layers=8,
         kernel_size=3,

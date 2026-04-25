@@ -5,18 +5,18 @@ import numpy as np
 from tqdm import tqdm
 
 from model import SoccerNetTCN
-from game_dataset import SoccerNetGameDataset, get_game_dataloader
+from game_dataset import SoccerNetGameDataset, get_game_dataloader, FEATURE_CONFIG
 from utils import get_device, set_seed, save_checkpoint
 
 
-def mask_features_tube_tcn(features, mask_ratio=0.75, tube_length=8):
+def mask_features_tube_tcn(features, mask_ratio=0.75, tube_length=4):
     """
     Tube masking for full match half sequences.
     Same principle as VideoMAE but applied to 5400-frame sequences.
 
     features   : tensor of shape (1, seq_len, input_dim)
     mask_ratio : fraction of frames to mask
-    tube_length: frames per tube (default 8 = 4 seconds at 2fps)
+    tube_length: frames per tube (default 4 = 2 seconds at 2fps)
 
     Returns masked_features, mask, original
     """
@@ -59,8 +59,8 @@ class TCNReconstructionHead(nn.Module):
 
 def pretrain_tcn(model, dataloader, num_epochs=50,
                  learning_rate=1e-3, mask_ratio=0.75,
-                 tube_length=8, checkpoint_dir="checkpoints",
-                 device=None):
+                 tube_length=4, checkpoint_dir="checkpoints",
+                 device=None, input_dim=8576):
     """
     Stage 1 pretraining for SoccerNetTCN using tube masking MFM.
     Processes full match halves instead of short windows.
@@ -72,7 +72,7 @@ def pretrain_tcn(model, dataloader, num_epochs=50,
     model = model.to(device)
 
     reconstruction_head = TCNReconstructionHead(
-        d_model=256, output_dim=512
+        d_model=256, output_dim=input_dim
     ).to(device)
 
     optimizer = torch.optim.Adam(
@@ -143,7 +143,13 @@ def pretrain_tcn(model, dataloader, num_epochs=50,
 
             masked_original = original[0, mask, :]
             masked_reconstructed = reconstructed[0, mask, :]
-            loss = criterion(masked_reconstructed, masked_original)
+
+            mean = masked_original.mean(dim=-1, keepdim=True)
+            std = masked_original.std(dim=-1, keepdim=True) + 1e-6
+            masked_original_norm = (masked_original - mean) / std
+            masked_reconstructed_norm = (masked_reconstructed - mean) / std
+
+            loss = criterion(masked_reconstructed_norm, masked_original_norm)
 
             optimizer.zero_grad()
             loss.backward()
@@ -211,7 +217,10 @@ if __name__ == "__main__":
     parser.add_argument("--batch_size", type=int, default=1)
     parser.add_argument("--learning_rate", type=float, default=1e-3)
     parser.add_argument("--mask_ratio", type=float, default=0.75)
-    parser.add_argument("--tube_length", type=int, default=8)
+    parser.add_argument("--tube_length", type=int, default=4)
+    parser.add_argument("--feature_type", type=str, default="baidu", choices=["resnet", "baidu"])
+    parser.add_argument("--label_radius", type=int, default=2)
+    parser.add_argument("--max_games", type=int, default=None)
     args = parser.parse_args()
 
     set_seed(42)
@@ -221,13 +230,16 @@ if __name__ == "__main__":
     train_dataset = SoccerNetGameDataset(
         data_path=args.data_path,
         split="train",
-        fps=2,
-        label_radius=4
+        feature_type=args.feature_type,
+        label_radius=args.label_radius,
+        max_games=args.max_games
     )
     train_loader = get_game_dataloader(train_dataset, shuffle=True)
 
+    input_dim = FEATURE_CONFIG[args.feature_type]["input_dim"]
+
     model = SoccerNetTCN(
-        input_dim=512,
+        input_dim=input_dim,
         d_model=256,
         num_layers=8,
         kernel_size=3,
@@ -243,5 +255,6 @@ if __name__ == "__main__":
         mask_ratio=args.mask_ratio,
         tube_length=args.tube_length,
         checkpoint_dir=args.checkpoint_dir,
-        device=device
+        device=device,
+        input_dim=input_dim
     )

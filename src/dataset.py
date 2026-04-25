@@ -30,10 +30,6 @@ CLASS_TO_IDX = {cls: idx for idx, cls in enumerate(SELECTED_CLASSES)}
 IDX_TO_CLASS = {idx: cls for cls, idx in CLASS_TO_IDX.items()}
 BACKGROUND_IDX = len(SELECTED_CLASSES)
 
-print("Class to index mapping:")
-for cls, idx in CLASS_TO_IDX.items():
-    print(f"  {cls}: {idx}")
-print(f"  Background: {BACKGROUND_IDX}")
 
 class SoccerNetDataset(Dataset):
     def __init__(self, data_path, split, window_size=60, overlap=0.5,
