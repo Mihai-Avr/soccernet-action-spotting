@@ -130,7 +130,8 @@ class SoccerNetTCN(nn.Module):
         num_layers=8,
         kernel_size=3,
         dropout=0.1,
-        num_classes=18
+        num_classes=18,
+        use_input_norm=True
     ):
         """
         Temporal Convolutional Network for dense action spotting.
@@ -146,7 +147,7 @@ class SoccerNetTCN(nn.Module):
         super().__init__()
 
         self.input_projection = nn.Linear(input_dim, d_model)
-        self.input_norm = nn.LayerNorm(d_model)
+        self.input_norm = nn.LayerNorm(d_model) if use_input_norm else nn.Identity()
 
         self.tcn_blocks = nn.ModuleList([
             TCNBlock(

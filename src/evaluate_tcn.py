@@ -9,7 +9,7 @@ import seaborn as sns
 from sklearn.metrics import classification_report, confusion_matrix
 
 from model import SoccerNetTCN
-from game_dataset import SoccerNetGameDataset, get_game_dataloader
+from game_dataset import FEATURE_CONFIG, SoccerNetGameDataset, get_game_dataloader
 from dataset import SELECTED_CLASSES, CLASS_TO_IDX, IDX_TO_CLASS, BACKGROUND_IDX
 from utils import get_device, load_checkpoint
 from SoccerNet.utils import getListGames
@@ -63,7 +63,7 @@ def find_peaks(probs, cls_idx, min_confidence=0.3,
 
 def compute_tcn_average_map(model, data_path, split, device,
                              tolerances=[1, 2, 3, 4, 5],
-                             fps=2, min_confidence=0.3):
+                             fps=2, min_confidence=0.3, feature_type="baidu"):
     """
     Computes Average-mAP for the TCN dense prediction model.
     Uses peak detection instead of sliding window inference.
@@ -85,9 +85,11 @@ def compute_tcn_average_map(model, data_path, split, device,
             data = json.load(f)
 
         for half in [1, 2]:
-            npy_path = os.path.join(
-                game_path, f"{half}_ResNET_TF2_PCA512.npy"
-            )
+            from game_dataset import FEATURE_CONFIG
+            config = FEATURE_CONFIG[feature_type]
+            npy_file = config["files"][half - 1]
+            npy_path = os.path.join(game_path, npy_file)
+
             if not os.path.exists(npy_path):
                 continue
 
@@ -246,17 +248,23 @@ if __name__ == "__main__":
     parser.add_argument("--split", type=str, default="test")
     parser.add_argument("--min_confidence", type=float, default=0.3)
     parser.add_argument("--compute_map", action="store_true")
+    parser.add_argument("--feature_type", type=str, default="baidu",
+                    choices=["resnet", "baidu"])
+    parser.add_argument("--label_radius", type=int, default=2)
+    parser.add_argument("--run_name", type=str, default="tcn")
     args = parser.parse_args()
 
     device = get_device()
-
+    input_dim = FEATURE_CONFIG[args.feature_type]["input_dim"]
+    use_input_norm = args.feature_type == "baidu"
     model = SoccerNetTCN(
-        input_dim=512,
+        input_dim=input_dim,
         d_model=256,
         num_layers=8,
         kernel_size=3,
         dropout=0.1,
-        num_classes=18
+        num_classes=18,
+        use_input_norm=use_input_norm
     )
 
     load_checkpoint(args.checkpoint, model, device=device)
@@ -266,8 +274,8 @@ if __name__ == "__main__":
     test_dataset = SoccerNetGameDataset(
         data_path=args.data_path,
         split=args.split,
-        fps=2,
-        label_radius=4
+        feature_type=args.feature_type,
+        label_radius=args.label_radius
     )
 
     print("\n--- Per-frame evaluation ---")
@@ -290,8 +298,8 @@ if __name__ == "__main__":
     plt.xlabel("Predicted label")
     plt.xticks(rotation=45, ha="right")
     plt.tight_layout()
-    plt.savefig("results/figures/tcn_confusion_matrix.png",
-                dpi=150, bbox_inches="tight")
+    plt.savefig(f"results/figures/confusion_matrix_{args.run_name}.png",
+            dpi=150, bbox_inches="tight")
     plt.show()
     print("Confusion matrix saved.")
 
@@ -302,7 +310,9 @@ if __name__ == "__main__":
             data_path=args.data_path,
             split=args.split,
             device=device,
-            min_confidence=args.min_confidence
+            min_confidence=args.min_confidence,
+            feature_type=args.feature_type,
+            fps=FEATURE_CONFIG[args.feature_type]["fps"]
         )
 
         print("\nAverage-mAP Results:")
@@ -323,5 +333,5 @@ if __name__ == "__main__":
                 mean_ap = np.mean(aps) * 100
                 print(f"  {cls_name}: {mean_ap:.2f}%")
 
-        np.save("results/tcn_map_results.npy", map_results)
-        print("\nmAP results saved to results/tcn_map_results.npy")
+        np.save(f"results/{args.run_name}_map_results.npy", map_results)
+        print(f"\nmAP results saved to results/{args.run_name}_map_results.npy")

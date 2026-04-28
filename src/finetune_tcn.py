@@ -6,20 +6,34 @@ from tqdm import tqdm
 
 from model import SoccerNetTCN
 from game_dataset import SoccerNetGameDataset, get_game_dataloader, FEATURE_CONFIG
-from dataset import SELECTED_CLASSES, BACKGROUND_IDX
+from dataset import CLASS_TO_IDX, SELECTED_CLASSES, BACKGROUND_IDX
 from utils import get_device, set_seed, load_checkpoint
 
 
 def compute_class_weights_dense(dataset, num_classes, device):
     """
-    Computes inverse frequency class weights from dense per-frame labels.
+    Computes inverse frequency class weights from annotation metadata.
+    Works with lazy loading — uses annotation counts instead of
+    loading full label arrays.
     """
     class_counts = torch.zeros(num_classes)
 
+    background_frames_per_half = int(45 * 60 * dataset.fps)
+    total_action_frames = 0
+
     for sample in dataset.samples:
-        labels = sample["labels"]
-        for cls_idx in range(num_classes):
-            class_counts[cls_idx] += (labels == cls_idx).sum()
+        for ann in sample["annotations"]:
+            cls_idx = CLASS_TO_IDX.get(ann["label"])
+            if cls_idx is not None:
+                frames = 2 * dataset.label_radius + 1
+                class_counts[cls_idx] += frames
+                total_action_frames += frames
+
+    total_halves = len(dataset.samples)
+    estimated_background = (
+        total_halves * background_frames_per_half - total_action_frames
+    )
+    class_counts[BACKGROUND_IDX] = max(1, estimated_background)
 
     class_weights = 1.0 / (torch.sqrt(class_counts) + 1e-6)
     class_weights = class_weights / class_weights.sum() * num_classes
@@ -106,7 +120,7 @@ def finetune_tcn(model, train_dataset, valid_dataset,
                   num_epochs=50, learning_rate=1e-4,
                   checkpoint_dir="checkpoints/tcn",
                   patience=10, device=None, num_classes=18,
-                  run_name="finetune_tcn"):
+                  run_name="finetune_tcn", resume_checkpoint=None, early_stop_metric="val_loss"):
     """
     Full Stage 2 dense prediction fine-tuning for SoccerNetTCN.
     """
@@ -134,15 +148,37 @@ def finetune_tcn(model, train_dataset, valid_dataset,
         optimizer, T_max=num_epochs, eta_min=1e-6
     )
 
-    train_loader = get_game_dataloader(train_dataset, shuffle=True)
-    valid_loader = get_game_dataloader(valid_dataset, shuffle=False)
-
     best_val_loss = float("inf")
+    best_val_acc = 0.0
     epochs_without_improvement = 0
+    start_epoch = 1
     history = {
         "train_loss": [], "train_acc": [],
         "val_loss": [], "val_acc": []
     }
+
+    if resume_checkpoint and os.path.exists(resume_checkpoint):
+        print(f"Resuming from: {resume_checkpoint}")
+        ckpt = torch.load(
+            resume_checkpoint, map_location=device, weights_only=False
+        )
+        model.load_state_dict(ckpt["model_state_dict"])
+        optimizer.load_state_dict(ckpt["optimizer_state_dict"])
+        if "scheduler_state_dict" in ckpt:
+            scheduler.load_state_dict(ckpt["scheduler_state_dict"])
+        start_epoch = ckpt["epoch"] + 1
+        best_val_loss = ckpt.get("val_loss", float("inf"))
+        best_val_acc = ckpt.get("val_acc", 0.0)
+        history = ckpt.get("history", {
+            "train_loss": [], "train_acc": [],
+            "val_loss": [], "val_acc": []
+        })
+        print(f"  Resumed from epoch {ckpt['epoch']} "
+            f"(val_acc: {ckpt.get('val_acc', 0):.1f}%)")
+
+    train_loader = get_game_dataloader(train_dataset, shuffle=True)
+    valid_loader = get_game_dataloader(valid_dataset, shuffle=False)
+
 
     print(f"\nStarting TCN Stage 2 fine-tuning on {device}")
     print(f"  Epochs        : {num_epochs} (patience={patience})")
@@ -151,7 +187,7 @@ def finetune_tcn(model, train_dataset, valid_dataset,
     print(f"  Valid halves  : {len(valid_dataset)}")
     print("-" * 60)
 
-    for epoch in range(1, num_epochs + 1):
+    for epoch in range(start_epoch, num_epochs + 1):
         train_loss, train_acc = finetune_tcn_one_epoch(
             model, train_loader, optimizer, criterion, device
         )
@@ -184,17 +220,26 @@ def finetune_tcn(model, train_dataset, valid_dataset,
             "history": history
         }, os.path.join(checkpoint_dir, f"{run_name}_latest.pt"))
 
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
+        if early_stop_metric == "val_loss":
+            improved = val_loss < best_val_loss
+            best_val_loss = min(best_val_loss, val_loss)
+        else:
+            improved = val_acc > best_val_acc
+            best_val_acc = max(best_val_acc, val_acc)
+
+        if improved:
             epochs_without_improvement = 0
             torch.save({
                 "epoch": epoch,
                 "model_state_dict": model.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+                "scheduler_state_dict": scheduler.state_dict(),
                 "val_loss": val_loss,
-                "val_acc": val_acc
+                "val_acc": val_acc,
+                "history": history
             }, os.path.join(checkpoint_dir, f"{run_name}_best.pt"))
             print(f"  -> New best model saved "
-                  f"(val_loss: {best_val_loss:.4f}, "
+                  f"(val_loss: {val_loss:.4f}, "
                   f"val_acc: {val_acc:.1f}%)")
         else:
             epochs_without_improvement += 1
@@ -206,7 +251,9 @@ def finetune_tcn(model, train_dataset, valid_dataset,
             break
 
     print("-" * 60)
-    print(f"Fine-tuning complete. Best val loss: {best_val_loss:.4f}")
+    print(f"Fine-tuning complete.")
+    print(f"  Best val loss: {best_val_loss:.4f}")
+    print(f"  Best val acc:  {best_val_acc:.1f}%")
 
     np.save(
         os.path.join(checkpoint_dir, f"{run_name}_history.npy"),
@@ -236,6 +283,11 @@ if __name__ == "__main__":
     parser.add_argument("--label_radius", type=int, default=2)
     parser.add_argument("--feature_type", type=str, default="baidu", choices=["resnet", "baidu"])
     parser.add_argument("--max_games", type=int, default=None)
+    parser.add_argument("--valid_data_path", type=str, default=None)
+    parser.add_argument("--resume_checkpoint", type=str, default=None)
+    parser.add_argument("--early_stop_metric", type=str,
+                        default="val_loss",
+                        choices=["val_loss", "val_acc"])
     args = parser.parse_args()
 
     set_seed(42)
@@ -249,11 +301,12 @@ if __name__ == "__main__":
         label_radius=args.label_radius,
         max_games=args.max_games
     )
+    valid_data_path = args.valid_data_path or args.data_path
     valid_dataset = SoccerNetGameDataset(
-        data_path=args.data_path,
+        data_path=valid_data_path,
         split="valid",
         feature_type=args.feature_type,
-        label_radius=args.label_radius,
+        label_radius=args.label_radius
     )
     
     input_dim = FEATURE_CONFIG[args.feature_type]["input_dim"]
@@ -284,5 +337,7 @@ if __name__ == "__main__":
         patience=args.patience,
         device=device,
         num_classes=18,
-        run_name=args.run_name
+        run_name=args.run_name,
+        resume_checkpoint=args.resume_checkpoint,
+        early_stop_metric=args.early_stop_metric
     )
