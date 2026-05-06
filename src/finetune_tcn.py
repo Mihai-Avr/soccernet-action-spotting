@@ -120,7 +120,11 @@ def finetune_tcn(model, train_dataset, valid_dataset,
                   num_epochs=50, learning_rate=1e-4,
                   checkpoint_dir="checkpoints/tcn",
                   patience=10, device=None, num_classes=18,
-                  run_name="finetune_tcn", resume_checkpoint=None, early_stop_metric="val_loss"):
+                  run_name="finetune_tcn",
+                  resume_checkpoint=None,
+                  early_stop_metric="val_loss",
+                  use_reweighting=True,
+                  use_label_smoothing=True):
     """
     Full Stage 2 dense prediction fine-tuning for SoccerNetTCN.
     """
@@ -130,13 +134,22 @@ def finetune_tcn(model, train_dataset, valid_dataset,
     os.makedirs(checkpoint_dir, exist_ok=True)
     model = model.to(device)
 
-    print("Computing class weights...")
-    class_weights = compute_class_weights_dense(
-        train_dataset, num_classes, device
-    )
-    criterion = nn.CrossEntropyLoss(
-        weight=class_weights, label_smoothing=0.1
-    )
+    smoothing = 0.1 if use_label_smoothing else 0.0
+
+    if use_reweighting:
+        print("Computing class weights...")
+        class_weights = compute_class_weights_dense(
+            train_dataset, num_classes, device
+        )
+        criterion = nn.CrossEntropyLoss(
+            weight=class_weights, label_smoothing=smoothing
+        )
+        print(f"  Class reweighting : enabled")
+        print(f"  Label smoothing   : {smoothing}")
+    else:
+        criterion = nn.CrossEntropyLoss(label_smoothing=smoothing)
+        print(f"  Class reweighting : disabled")
+        print(f"  Label smoothing   : {smoothing}")
 
     optimizer = torch.optim.Adam(
         model.parameters(),
@@ -288,6 +301,10 @@ if __name__ == "__main__":
     parser.add_argument("--early_stop_metric", type=str,
                         default="val_loss",
                         choices=["val_loss", "val_acc"])
+    parser.add_argument("--no_reweighting", action="store_true",
+                        help="Disable class reweighting in loss function")
+    parser.add_argument("--no_label_smoothing", action="store_true",
+                        help="Disable label smoothing in loss function")
     args = parser.parse_args()
 
     set_seed(42)
@@ -339,5 +356,7 @@ if __name__ == "__main__":
         num_classes=18,
         run_name=args.run_name,
         resume_checkpoint=args.resume_checkpoint,
-        early_stop_metric=args.early_stop_metric
+        early_stop_metric=args.early_stop_metric,
+        use_reweighting=not args.no_reweighting,
+        use_label_smoothing=not args.no_label_smoothing
     )
