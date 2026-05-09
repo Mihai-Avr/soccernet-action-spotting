@@ -21,10 +21,31 @@ FEATURE_CONFIG = {
     }
 }
 
+PER_CLASS_LABEL_RADIUS = {
+    0:  1,  # Ball out of play — instantaneous
+    1:  1,  # Throw-in — instantaneous
+    2:  2,  # Foul — brief but visible
+    3:  2,  # Indirect free-kick — setup visible
+    4:  1,  # Clearance — instantaneous
+    5:  1,  # Shots on target — instantaneous
+    6:  1,  # Shots off target — instantaneous
+    7:  2,  # Corner — setup takes a moment
+    8:  3,  # Substitution — player walking takes time
+    9:  2,  # Kick-off — setup visible
+    10: 2,  # Direct free-kick — setup visible
+    11: 2,  # Offside — flag + whistle sequence
+    12: 1,  # Yellow card — very brief gesture
+    13: 2,  # Goal — celebration visible for several seconds
+    14: 3,  # Penalty — setup is long
+    15: 1,  # Red card — very brief gesture
+    16: 2,  # Yellow->red card — two cards shown
+}
+
 
 class SoccerNetGameDataset(Dataset):
     def __init__(self, data_path, split, feature_type="baidu",
-                 label_radius=2, random_seed=42, max_games=None):
+                 label_radius=2, random_seed=42, max_games=None,
+                 use_per_class_radius=False):
         """
         Loads full match halves for dense prediction training.
         Uses lazy loading — features are loaded from disk on demand
@@ -46,6 +67,11 @@ class SoccerNetGameDataset(Dataset):
         self.fps = self.config["fps"]
         self.input_dim = self.config["input_dim"]
         self.label_radius = label_radius
+        self.use_per_class_radius = use_per_class_radius
+        if use_per_class_radius:
+            print(f"  Label radius     : per-class (see PER_CLASS_LABEL_RADIUS)")
+        else:
+            print(f"  Label radius     : {label_radius} (uniform)")
         self.samples = []
 
         game_list = getListGames(split)
@@ -95,7 +121,8 @@ class SoccerNetGameDataset(Dataset):
                     "game": game,
                     "half": half,
                     "label_radius": label_radius,
-                    "fps": self.fps
+                    "fps": self.fps,
+                    "use_per_class_radius": use_per_class_radius
                 })
 
                 total_action_frames += len(half_annotations) * (
@@ -129,11 +156,15 @@ class SoccerNetGameDataset(Dataset):
             center_frame = min(center_frame, num_frames - 1)
             cls_idx = CLASS_TO_IDX[ann["label"]]
 
-            start = max(0, center_frame - sample["label_radius"])
-            end = min(
-                num_frames,
-                center_frame + sample["label_radius"] + 1
-            )
+            if sample["use_per_class_radius"]:
+                radius = PER_CLASS_LABEL_RADIUS.get(
+                    cls_idx, sample["label_radius"]
+                )
+            else:
+                radius = sample["label_radius"]
+
+            start = max(0, center_frame - radius)
+            end = min(num_frames, center_frame + radius + 1)
             labels[start:end] = cls_idx
 
         features_tensor = torch.tensor(features, dtype=torch.float32)

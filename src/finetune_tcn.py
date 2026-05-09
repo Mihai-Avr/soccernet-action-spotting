@@ -305,6 +305,8 @@ if __name__ == "__main__":
                         help="Disable class reweighting in loss function")
     parser.add_argument("--no_label_smoothing", action="store_true",
                         help="Disable label smoothing in loss function")
+    parser.add_argument("--use_per_class_radius", action="store_true",
+                    help="Use per-class label radius instead of uniform")
     args = parser.parse_args()
 
     set_seed(42)
@@ -316,14 +318,16 @@ if __name__ == "__main__":
         split="train",
         feature_type=args.feature_type,
         label_radius=args.label_radius,
-        max_games=args.max_games
+        max_games=args.max_games,
+        use_per_class_radius=args.use_per_class_radius
     )
     valid_data_path = args.valid_data_path or args.data_path
     valid_dataset = SoccerNetGameDataset(
         data_path=valid_data_path,
         split="valid",
         feature_type=args.feature_type,
-        label_radius=args.label_radius
+        label_radius=args.label_radius,
+        use_per_class_radius=args.use_per_class_radius
     )
     
     input_dim = FEATURE_CONFIG[args.feature_type]["input_dim"]
